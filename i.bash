@@ -24,5 +24,6 @@ run npx --yes skills add miguelspizza/skills --skill write-good-docs --agent '*'
 run npx --yes skills add hamen/material-3-skill --skill material-3 --agent '*' --yes
 run npx --yes skills add pbakaus/impeccable --agent '*' --yes
 run npx --yes skills add JuliusBrussee/caveman --agent '*' --yes
+run npx --yes skills add blader/humanizer --agent '*' --yes
 
 log "Done"
