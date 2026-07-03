@@ -20,13 +20,9 @@ bash -lc 'curl -fsSL https://opencode.ai/install | bash'
 
 log "Installing skills"
 run npx --yes skills add miguelspizza/skills --skill maintainable-typescript --agent '*' --yes
-run npx --yes skills add miguelspizza/skills --skill webmcp-designer --agent '*' --yes
 run npx --yes skills add miguelspizza/skills --skill write-good-docs --agent '*' --yes
-
+run npx --yes skills add hamen/material-3-skill --skill material-3 --agent '*' --yes
 run npx --yes skills add pbakaus/impeccable --agent '*' --yes
 run npx --yes skills add JuliusBrussee/caveman --agent '*' --yes
-
-log "Installing Caveman Code globally"
-run npm install -g @juliusbrussee/caveman-code
 
 log "Done"
