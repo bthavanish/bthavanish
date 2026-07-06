@@ -1,12 +1,18 @@
 #!/bin/bash
 # LineageOS 23.2 Build Script for Samsung Galaxy Tab A9+ (gta9p / SM-X216B)
-# Designed for crave.io
+# Designed for crave.io (unsupported ROM method)
 #
-# Usage:
-#   crave run --no-patch --clean "bash build_gta9p.sh"
+# Prerequisites:
+#   1. Install crave CLI: https://fosson.top/crave/getting-started/installing-crave.html
+#   2. Create a LineageOS project:
+#      crave clone list                          # find LineageOS project ID
+#      crave clone create --projectID <ID> /crave-devspaces/Lineage-gta9p
+#      cd /crave-devspaces/Lineage-gta9p
 #
-# Or upload to GitHub and:
-#   crave run --no-patch --clean "git clone https://github.com/bthavanish/build_scripts && bash build_scripts/build_gta9p.sh"
+# Usage (from the project folder):
+#   crave run --no-patch -- "bash /path/to/build_gta9p.sh"
+#
+# Or paste the commands directly into crave run.
 
 set -e
 
@@ -14,21 +20,18 @@ echo "=== LineageOS 23.2 Build for Samsung Galaxy Tab A9+ ==="
 echo "Start: $(date)"
 
 # -----------------------------------------------
-# Step 1: Initialize LineageOS 23.2 repo
+# Step 1: Reinit with LineageOS 23.2 manifest
 # -----------------------------------------------
-echo "[1/6] Initializing LineageOS repo..."
+echo "[1/6] Reinitializing LineageOS repo..."
 rm -rf .repo/local_manifests
 repo init -u https://github.com/LineageOS/android.git \
     -b lineage-23.2 \
-    --git-lfs \
-    --depth=1
+    --git-lfs
 
 # -----------------------------------------------
-# Step 2: Create local manifests for our repos
+# Step 2: Create local manifests for device trees
 # -----------------------------------------------
 echo "[2/6] Creating local manifests..."
-mkdir -p .repo/local_manifests
-
 cat > .repo/local_manifests/gta9p.xml << 'EOF'
 <manifest>
     <!-- Kernel -->
@@ -62,31 +65,21 @@ cat > .repo/local_manifests/gta9p.xml << 'EOF'
 EOF
 
 # -----------------------------------------------
-# Step 3: Sync sources
+# Step 3: Sync using resync.sh (required by crave rules)
 # -----------------------------------------------
-echo "[3/6] Syncing sources (this takes a while)..."
+echo "[3/6] Syncing sources..."
 /opt/crave/resync.sh
 
 # -----------------------------------------------
-# Step 4: Fix kernel repo if shallow clone issues
+# Step 4: Setup build environment
 # -----------------------------------------------
-echo "[4/6] Verifying kernel..."
-if [ ! -f "kernel/samsung/sm6375/Makefile" ]; then
-    echo "Kernel missing, re-cloning..."
-    rm -rf kernel/samsung/sm6375
-    git clone --depth=1 -b lineage-22.1 \
-        https://github.com/bthavanish/android_kernel_samsung_sm6375.git \
-        kernel/samsung/sm6375
-fi
-
-# -----------------------------------------------
-# Step 5: Setup build environment
-# -----------------------------------------------
-echo "[5/6] Setting up build environment..."
+echo "[4/6] Setting up build environment..."
 source build/envsetup.sh
 
-# Lunch target: lineage_gta9p-userdebug
-# (product name from lineage_gta9p.mk: PRODUCT_NAME := lineage_gta9p)
+# -----------------------------------------------
+# Step 5: Lunch target
+# -----------------------------------------------
+echo "[5/6] Selecting lunch target..."
 lunch lineage_gta9p-userdebug
 
 # -----------------------------------------------
@@ -94,13 +87,9 @@ lunch lineage_gta9p-userdebug
 # -----------------------------------------------
 echo "[6/6] Starting build..."
 echo "Build started: $(date)"
-
-# Build the ROM (use mka for parallel builds)
 mka bacon
 
 echo "=== Build Complete ==="
 echo "End: $(date)"
 echo "Output: out/target/product/gta9p/"
-
-# List the output
 ls -la out/target/product/gta9p/*.zip 2>/dev/null || echo "No zip found, check build log"
