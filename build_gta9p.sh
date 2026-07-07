@@ -4,7 +4,7 @@
 #
 # Setup (one time):
 #   crave clone list                                  # find "LOS 21" project ID
-#   crave clone create --projectID <LOS21_ID> /crave-devspaces/Lineage-gta9p
+#   crave clone create --projectID <ID> /crave-devspaces/Lineage-gta9p
 #
 # Build:
 #   cd /crave-devspaces/Lineage-gta9p
@@ -15,13 +15,14 @@ set -e
 echo "=== LineageOS 23.2 Build for Samsung Galaxy Tab A9+ ==="
 echo "Start: $(date)"
 
-# Reinit to LineageOS 23.2 (unsupported, using LOS 21 project as base)
+# Reinit to LineageOS 23.2
 rm -rf .repo/local_manifests
 repo init -u https://github.com/LineageOS/android.git \
     -b lineage-23.2 \
     --git-lfs
 
 # Add our device repos as local manifests
+mkdir -p .repo/local_manifests
 cat > .repo/local_manifests/gta9p.xml << 'EOF'
 <manifest>
     <project name="bthavanish/android_kernel_samsung_sm6375"
@@ -47,7 +48,7 @@ cat > .repo/local_manifests/gta9p.xml << 'EOF'
 </manifest>
 EOF
 
-# Sync using crave's resync (never use repo sync directly)
+# Sync using crave's resync
 /opt/crave/resync.sh
 
 # Build
