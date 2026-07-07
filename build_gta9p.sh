@@ -10,7 +10,7 @@
 #   cd /crave-devspaces/Lineage-gta9p
 #   crave run --no-patch -- "bash build_gta9p.sh"
 
-set -euo pipefail
+set -e
 
 # ============================================
 # TUI / Styling
@@ -25,86 +25,47 @@ BLUE='\033[1;34m'
 MAGENTA='\033[1;35m'
 CYAN='\033[1;36m'
 WHITE='\033[1;37m'
-BG_BLACK='\033[40m'
 
 LOGFILE="build_$(date +%Y%m%d_%H%M%S).log"
 
 header() {
-    clear
-    echo -e "${BG_BLACK}"
+    echo ""
     echo -e "${CYAN}${BOLD}"
-    echo "╔══════════════════════════════════════════════════════════════╗"
-    echo "║                                                              ║"
-    echo "║   ██╗     ██╗███╗   ███╗██████╗     █████╗  ██████╗ ██████╗  ║"
-    echo "║   ██║     ██║████╗ ████║██╔══██╗   ██╔══██╗██╔═══██╗██╔══██╗ ║"
-    echo "║   ██║     ██║██╔████╔██║██████╔╝   ███████║██║   ██║██████╔╝ ║"
-    echo "║   ██║     ██║██║╚██╔╝██║██╔═══╝    ██╔══██║██║   ██║██╔══██╗ ║"
-    echo "║   ███████╗██║██║ ╚═╝ ██║██║        ██║  ██║╚██████╔╝██║  ██║ ║"
-    echo "║   ╚══════╝╚═╝╚═╝     ╚═╝╚═╝        ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝ ║"
-    echo "║                                                              ║"
-    echo "║          ${WHITE}Samsung Galaxy Tab A9+ (SM-X216B)${CYAN}               ║"
-    echo "║          ${DIM}LineageOS 23.2 | Android 16 QPR2${RESET}${CYAN}${BOLD}                ║"
-    echo "║                                                              ║"
-    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo "=========================================="
+    echo "  LINEAGEOS 23.2 - Samsung Galaxy Tab A9+"
+    echo "  SM-X216B | SM6375 (holi)"
+    echo "=========================================="
     echo -e "${RESET}"
     echo ""
 }
 
 step() {
-    local step_num=$1
-    local total=$2
-    local msg=$3
-    echo -e "${BLUE}${BOLD}[$step_num/$total]${RESET} ${WHITE}${BOLD}$msg${RESET}"
-    echo -e "${DIM}────────────────────────────────────────────────────────────${RESET}"
+    echo -e "${BLUE}${BOLD}[$1/$2]${RESET} ${WHITE}${BOLD}$3${RESET}"
+    echo -e "${DIM}------------------------------------------${RESET}"
 }
 
 ok() {
-    echo -e "  ${GREEN}✓${RESET} $1"
+    echo -e "  ${GREEN}[OK]${RESET} $1"
 }
 
 warn() {
-    echo -e "  ${YELLOW}⚠${RESET} $1"
+    echo -e "  ${YELLOW}[WARN]${RESET} $1"
     echo "  [WARN] $1" >> "$LOGFILE"
 }
 
 err() {
-    echo -e "  ${RED}✗${RESET} $1"
+    echo -e "  ${RED}[ERR]${RESET} $1"
     echo "  [ERROR] $1" >> "$LOGFILE"
 }
 
 die() {
     err "$1"
     echo ""
-    echo -e "${RED}${BOLD}╔══════════════════════════════════════════╗${RESET}"
-    echo -e "${RED}${BOLD}║           BUILD FAILED                   ║${RESET}"
-    echo -e "${RED}${BOLD}╚══════════════════════════════════════════╝${RESET}"
-    echo -e "  Log: ${DIM}${LOGFILE}${RESET}"
+    echo -e "${RED}${BOLD}=========================================="
+    echo -e "  BUILD FAILED"
+    echo -e "==========================================${RESET}"
+    echo -e "  Log: ${LOGFILE}"
     exit 1
-}
-
-spinner() {
-    local pid=$1
-    local msg=${2:-"Working..."}
-    local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-    local i=0
-    while kill -0 "$pid" 2>/dev/null; do
-        printf "\r  ${CYAN}%s${RESET} %s" "${spin:i++%${#spin}:1}" "$msg"
-        sleep 0.1
-    done
-    printf "\r"
-}
-
-progress_bar() {
-    local current=$1
-    local total=$2
-    local width=40
-    local pct=$((current * 100 / total))
-    local filled=$((current * width / total))
-    local empty=$((width - filled))
-    printf "\r  ["
-    printf "%${filled}s" | tr ' ' '█'
-    printf "%${empty}s" | tr ' ' '░'
-    printf "] %3d%%" "$pct"
 }
 
 # ============================================
@@ -116,22 +77,36 @@ DEVICE="gta9p"
 LUNCH_TARGET="lineage_${DEVICE}-userdebug"
 TOTAL_STEPS=6
 
-REPOS=(
-    "bthavanish/android_kernel_samsung_sm6375      kernel/samsung/sm6375        ${KERNEL_BRANCH}"
-    "bthavanish/android_device_samsung_gta9p-common device/samsung/gta9p-common  ${LINEAGE_BRANCH}"
-    "bthavanish/android_device_samsung_gta9p       device/samsung/gta9p         ${LINEAGE_BRANCH}"
-    "bthavanish/android_vendor_samsung_gta9p-common vendor/samsung/gta9p-common  ${LINEAGE_BRANCH}"
-    "bthavanish/android_vendor_samsung_gta9p       vendor/samsung/gta9p         ${LINEAGE_BRANCH}"
+REPO_NAMES=(
+    "bthavanish/android_kernel_samsung_sm6375"
+    "bthavanish/android_device_samsung_gta9p-common"
+    "bthavanish/android_device_samsung_gta9p"
+    "bthavanish/android_vendor_samsung_gta9p-common"
+    "bthavanish/android_vendor_samsung_gta9p"
+)
+REPO_PATHS=(
+    "kernel/samsung/sm6375"
+    "device/samsung/gta9p-common"
+    "device/samsung/gta9p"
+    "vendor/samsung/gta9p-common"
+    "vendor/samsung/gta9p"
+)
+REPO_BRANCHES=(
+    "${KERNEL_BRANCH}"
+    "${LINEAGE_BRANCH}"
+    "${LINEAGE_BRANCH}"
+    "${LINEAGE_BRANCH}"
+    "${LINEAGE_BRANCH}"
 )
 
 # ============================================
-# Helpers
+# Cleanup on failure
 # ============================================
 cleanup() {
     local exit_code=$?
     if [ $exit_code -ne 0 ]; then
         echo ""
-        err "Build failed at line ${BASH_LINENO[0]:-unknown} (exit code: $exit_code)"
+        err "Script failed (exit code: $exit_code)"
         err "Full log: ${LOGFILE}"
     fi
 }
@@ -146,43 +121,33 @@ preflight() {
 
     # Commands
     for cmd in repo git; do
-        if command -v "$cmd" &>/dev/null; then
-            ok "$cmd found: $(command -v "$cmd")"
+        if command -v "$cmd" >/dev/null 2>&1; then
+            ok "$cmd found"
         else
             err "$cmd not found"
-            ((issues++))
+            issues=$((issues + 1))
         fi
     done
 
-    # Crave
+    # Crave resync
     if [ -f "/opt/crave/resync.sh" ]; then
         ok "crave resync found"
     else
-        err "/opt/crave/resync.sh not found (not on crave.io?)"
-        ((issues++))
+        err "/opt/crave/resync.sh not found (not on crave?)"
+        issues=$((issues + 1))
     fi
 
     # Disk space
-    local free_gb
-    free_gb=$(df -BG --output=avail . 2>/dev/null | tail -1 | tr -d ' G' || echo "0")
+    local free_kb
+    free_kb=$(df -k . 2>/dev/null | tail -1 | awk '{print $4}' || echo "0")
+    local free_gb=$((free_kb / 1024 / 1024))
     if [ "$free_gb" -ge 100 ]; then
-        ok "Disk space: ${free_gb}GB free"
+        ok "Disk: ${free_gb}GB free"
     elif [ "$free_gb" -ge 50 ]; then
-        warn "Disk space: ${free_gb}GB free (recommended: 100GB+)"
+        warn "Disk: ${free_gb}GB free (recommend 100GB+)"
     else
-        err "Disk space: ${free_gb}GB free (need 50GB+ minimum)"
-        ((issues++))
-    fi
-
-    # RAM
-    local ram_gb
-    ram_gb=$(free -g 2>/dev/null | awk '/Mem:/{print $2}' || echo "0")
-    if [ "$ram_gb" -ge 32 ]; then
-        ok "RAM: ${ram_gb}GB"
-    elif [ "$ram_gb" -ge 16 ]; then
-        warn "RAM: ${ram_gb}GB (recommended: 32GB+)"
-    else
-        warn "RAM: ${ram_gb}GB (build may be slow)"
+        err "Disk: ${free_gb}GB free (need 50GB+)"
+        issues=$((issues + 1))
     fi
 
     echo ""
@@ -202,22 +167,21 @@ init_repo() {
     rm -rf .repo/local_manifests
 
     # Check if already correct
-    if [ -f ".repo/manifest.xml" ] && grep -q "$LINEAGE_BRANCH" .repo/manifest.xml 2>/dev/null; then
-        ok "Already initialized with ${LINEAGE_BRANCH}"
-        return 0
-    fi
-
-    # Remove stale init
-    if [ -d ".repo/manifests" ]; then
-        warn "Removing previous repo init (different branch)"
-        rm -rf .repo/manifests .repo/manifest.xml
+    if [ -f ".repo/manifest.xml" ]; then
+        if grep -q "$LINEAGE_BRANCH" .repo/manifest.xml 2>/dev/null; then
+            ok "Already initialized with ${LINEAGE_BRANCH}"
+            return 0
+        else
+            warn "Different branch detected, reinitializing"
+            rm -rf .repo/manifests .repo/manifest.xml
+        fi
     fi
 
     echo -e "  ${DIM}Cloning LineageOS manifest...${RESET}"
     if ! repo init -u https://github.com/LineageOS/android.git \
         -b "$LINEAGE_BRANCH" \
-        --git-lfs 2>&1 | tee -a "$LOGFILE"; then
-        die "repo init failed"
+        --git-lfs >> "$LOGFILE" 2>&1; then
+        die "repo init failed - check log: ${LOGFILE}"
     fi
 
     ok "Repo initialized"
@@ -233,34 +197,34 @@ create_manifests() {
     mkdir -p .repo/local_manifests
 
     local count=0
-    local total=${#REPOS[@]}
+    local total=${#REPO_NAMES[@]}
 
-    for repo_info in "${REPOS[@]}"; do
-        read -r repo_name repo_path repo_branch <<< "$repo_info"
-        ((count++))
-        progress_bar $count $total
-        echo ""
+    for i in $(seq 0 $((total - 1))); do
+        count=$((count + 1))
+        local name="${REPO_NAMES[$i]}"
+        local path="${REPO_PATHS[$i]}"
+        local branch="${REPO_BRANCHES[$i]}"
 
-        # Validate repo exists
-        if git ls-remote --heads "https://github.com/${repo_name}.git" "$repo_branch" &>/dev/null; then
-            ok "${repo_name} @ ${repo_branch}"
+        echo -e "  ${DIM}[$count/$total]${RESET} Checking ${name} @ ${branch}..."
+
+        if git ls-remote --heads "https://github.com/${name}.git" "$branch" >/dev/null 2>&1; then
+            ok "${path} @ ${branch}"
         else
-            die "Repository not found: ${repo_name} @ ${repo_branch}"
+            die "Repo or branch not found: ${name} @ ${branch}"
         fi
     done
 
     # Write manifest
     {
         echo "<manifest>"
-        for repo_info in "${REPOS[@]}"; do
-            read -r repo_name repo_path repo_branch <<< "$repo_info"
-            echo "    <project name=\"${repo_name}\" path=\"${repo_path}\" remote=\"github\" revision=\"${repo_branch}\" />"
+        for i in $(seq 0 $((${#REPO_NAMES[@]} - 1))); do
+            echo "    <project name=\"${REPO_NAMES[$i]}\" path=\"${REPO_PATHS[$i]}\" remote=\"github\" revision=\"${REPO_BRANCHES[$i]}\" />"
         done
         echo "</manifest>"
     } > .repo/local_manifests/gta9p.xml
 
     echo ""
-    ok "Local manifests created (${#REPOS[@]} repos)"
+    ok "Local manifests created (${total} repos)"
     echo ""
 }
 
@@ -270,20 +234,16 @@ create_manifests() {
 sync_sources() {
     step 4 $TOTAL_STEPS "Syncing Sources"
 
+    echo -e "  ${DIM}Using /opt/crave/resync.sh ...${RESET}"
     echo -e "  ${DIM}This may take 30-60 minutes...${RESET}"
-    echo -e "  ${DIM}Using /opt/crave/resync.sh (required by crave rules)${RESET}"
     echo ""
 
-    if ! /opt/crave/resync.sh 2>&1 | tee -a "$LOGFILE"; then
-        err "Sync failed. Common fixes:"
-        echo -e "    ${YELLOW}1${RESET} Run with --clean flag"
-        echo -e "    ${YELLOW}2${RESET} Check network connectivity"
-        echo -e "    ${YELLOW}3${RESET} Verify all repos are public"
+    if ! /opt/crave/resync.sh >> "$LOGFILE" 2>&1; then
+        err "Sync failed. Check log: ${LOGFILE}"
         die "Source sync failed"
     fi
 
     # Verify critical files
-    echo ""
     echo -e "  ${DIM}Verifying sync...${RESET}"
     local missing=0
     for f in build/envsetup.sh device/samsung/gta9p/device.mk vendor/samsung/gta9p/gta9p-vendor.mk; do
@@ -291,11 +251,13 @@ sync_sources() {
             ok "$f"
         else
             err "$f missing"
-            ((missing++))
+            missing=$((missing + 1))
         fi
     done
 
-    [ $missing -eq 0 ] || die "$missing critical file(s) missing after sync"
+    if [ $missing -gt 0 ]; then
+        die "$missing critical file(s) missing after sync"
+    fi
     echo ""
 }
 
@@ -306,16 +268,15 @@ setup_and_lunch() {
     step 5 $TOTAL_STEPS "Build Environment & Lunch"
 
     echo -e "  ${DIM}Sourcing build/envsetup.sh...${RESET}"
-    if ! source build/envsetup.sh 2>&1 | tee -a "$LOGFILE"; then
+    if ! source build/envsetup.sh >> "$LOGFILE" 2>&1; then
         die "Failed to source envsetup.sh"
     fi
     ok "envsetup.sh loaded"
 
     echo -e "  ${DIM}Running lunch ${LUNCH_TARGET}...${RESET}"
-    if ! lunch "$LUNCH_TARGET" 2>&1 | tee -a "$LOGFILE"; then
-        err "lunch failed. Trying to find available targets:"
-        lunch 2>&1 | grep -i "gta9p\|samsung" | head -5 || echo "  No matching targets"
-        die "lunch ${LUNCH_TARGET} failed"
+    if ! lunch "$LUNCH_TARGET" >> "$LOGFILE" 2>&1; then
+        err "lunch ${LUNCH_TARGET} failed"
+        die "lunch failed - check log: ${LOGFILE}"
     fi
     ok "Target: ${TARGET_PRODUCT:-unknown}"
     echo ""
@@ -327,16 +288,14 @@ setup_and_lunch() {
 build_rom() {
     step 6 $TOTAL_STEPS "Building ROM"
 
-    echo -e "  ${MAGENTA}${BOLD}This will take 1-3 hours depending on server load${RESET}"
+    echo -e "  ${MAGENTA}This will take 1-3 hours...${RESET}"
     echo -e "  ${DIM}Output: out/target/product/${DEVICE}/lineage-*.zip${RESET}"
-    echo ""
-    echo -e "  ${CYAN}Building...${RESET}"
     echo ""
 
     local start_time=$SECONDS
 
-    if ! mka bacon 2>&1 | tee -a "$LOGFILE"; then
-        err "Build failed. Check log: ${LOGFILE}"
+    if ! mka bacon >> "$LOGFILE" 2>&1; then
+        err "Build failed - check log: ${LOGFILE}"
         die "mka bacon failed"
     fi
 
@@ -345,9 +304,9 @@ build_rom() {
     local secs=$(( elapsed % 60 ))
 
     echo ""
-    echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════╗${RESET}"
-    echo -e "${GREEN}${BOLD}║          BUILD SUCCESSFUL!               ║${RESET}"
-    echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════╝${RESET}"
+    echo -e "${GREEN}${BOLD}=========================================="
+    echo -e "  BUILD SUCCESSFUL!"
+    echo -e "==========================================${RESET}"
     echo ""
     echo -e "  ${WHITE}Time:${RESET} ${mins}m ${secs}s"
     echo -e "  ${WHITE}Output:${RESET} out/target/product/${DEVICE}/"
@@ -355,19 +314,18 @@ build_rom() {
 
     # List zips
     local zips
-    zips=$(find "out/target/product/${DEVICE}" -maxdepth 1 -name "*.zip" -type f 2>/dev/null)
+    zips=$(find "out/target/product/${DEVICE}" -maxdepth 1 -name "*.zip" -type f 2>/dev/null || true)
     if [ -n "$zips" ]; then
         echo -e "  ${GREEN}Files:${RESET}"
         echo "$zips" | while read -r z; do
             local size
             size=$(du -h "$z" | cut -f1)
-            echo -e "    ${GREEN}→${RESET} $(basename "$z") ${DIM}(${size})${RESET}"
+            echo -e "    ${GREEN}->${RESET} $(basename "$z") ${DIM}(${size})${RESET}"
         done
     fi
 
     echo ""
     echo -e "  ${DIM}Log: ${LOGFILE}${RESET}"
-    echo -e "  ${DIM}Flash: adb push out/target/product/${DEVICE}/lineage-*.zip /sdcard/${RESET}"
     echo ""
 }
 
