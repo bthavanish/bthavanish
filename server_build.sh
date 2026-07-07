@@ -14,7 +14,7 @@ set -e
 # Configuration
 # ============================================
 LINEAGE_BRANCH="lineage-23.2"
-KERNEL_BRANCH="lineage-22.1"
+KERNEL_BRANCH="samsung-5.4.249"
 DEVICE="gta9p"
 LUNCH_TARGET="lineage_${DEVICE}-userdebug"
 BUILD_DIR="$HOME/android"
