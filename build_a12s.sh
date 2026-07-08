@@ -10,7 +10,7 @@
 #   cd /crave-devspaces/Lineage-a12s
 #   crave run --no-patch -- "bash build_a12s.sh"
 
-set -e
+set -euo pipefail
 
 # ============================================
 # TUI / Styling
@@ -27,6 +27,7 @@ CYAN='\033[1;36m'
 WHITE='\033[1;37m'
 
 LOGFILE="build_$(date +%Y%m%d_%H%M%S).log"
+TOTAL_STEPS=7
 
 header() {
     echo ""
@@ -40,7 +41,7 @@ header() {
 }
 
 step() {
-    echo -e "${BLUE}${BOLD}[$1/$2]${RESET} ${WHITE}${BOLD}$3${RESET}"
+    echo -e "${BLUE}${BOLD}[$1/$TOTAL_STEPS]${RESET} ${WHITE}${BOLD}$2${RESET}"
     echo -e "${DIM}------------------------------------------${RESET}"
 }
 
@@ -74,7 +75,10 @@ die() {
 LINEAGE_BRANCH="lineage-21"
 DEVICE="a12s"
 LUNCH_TARGET="lineage_${DEVICE}-userdebug"
-TOTAL_STEPS=6
+
+# Required environment for Samsung legacy kernel build system
+export KERNEL_DEFCONFIG="exynos850-a12snsxx_defconfig"
+export TARGET_SOC="exynos850"
 
 REPO_NAMES=(
     "bthavanish/android_kernel_samsung_a12s"
@@ -106,6 +110,16 @@ REPO_BRANCHES=(
     "${LINEAGE_BRANCH}"
     "${LINEAGE_BRANCH}"
 )
+REPO_REMOTES=(
+    "github"
+    "github"
+    "github"
+    "github"
+    "github"
+    "github"
+    "github"
+    "github"
+)
 
 # ============================================
 # Cleanup on failure
@@ -121,19 +135,23 @@ cleanup() {
 trap cleanup EXIT
 
 # ============================================
-# Pre-flight checks
+# Step 1: Pre-flight checks
 # ============================================
 preflight() {
-    step 1 $TOTAL_STEPS "Pre-flight Checks"
+    step 1 "Pre-flight Checks"
     local issues=0
 
     # Commands
-    for cmd in repo git; do
+    for cmd in repo git ccache; do
         if command -v "$cmd" >/dev/null 2>&1; then
             ok "$cmd found"
         else
-            err "$cmd not found"
-            issues=$((issues + 1))
+            if [ "$cmd" = "ccache" ]; then
+                warn "ccache not found — builds will be slower without it"
+            else
+                err "$cmd not found"
+                issues=$((issues + 1))
+            fi
         fi
     done
 
@@ -158,6 +176,14 @@ preflight() {
         issues=$((issues + 1))
     fi
 
+    # Kernel userdebug cfg — create if missing to prevent merge_config failure
+    local user_cfg="kernel/samsung/a12s/arch/arm64/configs/exynos850_userdebug.cfg"
+    if [ -f "$user_cfg" ]; then
+        ok "Kernel userdebug.cfg found"
+    else
+        warn "Kernel userdebug.cfg missing — will be created after sync (Issue 2.1)"
+    fi
+
     echo ""
     if [ $issues -gt 0 ]; then
         die "Pre-flight failed with $issues issue(s)"
@@ -170,30 +196,32 @@ preflight() {
 # Step 2: Initialize repo
 # ============================================
 init_repo() {
-    step 2 $TOTAL_STEPS "Initializing LineageOS ${LINEAGE_BRANCH}"
+    step 2 "Initializing LineageOS ${LINEAGE_BRANCH}"
 
     rm -rf .repo/local_manifests
 
-    # Check if already correct — guard grep from set -e
+    # Use grep with || true so set -e doesn't fire on no-match
+    local already_init=0
     if [ -f ".repo/manifest.xml" ]; then
-        (set +e; grep -q "$LINEAGE_BRANCH" .repo/manifest.xml 2>/dev/null)
-        if [ $? -eq 0 ]; then
-            ok "Already initialized with ${LINEAGE_BRANCH}"
-            return 0
+        if grep -q "$LINEAGE_BRANCH" .repo/manifest.xml 2>/dev/null; then
+            already_init=1
         else
             warn "Different branch detected, reinitializing"
             rm -rf .repo/manifests .repo/manifest.xml
         fi
     fi
 
-    echo -e "  ${DIM}Cloning LineageOS manifest...${RESET}"
-    if ! repo init -u https://github.com/LineageOS/android.git \
-        -b "$LINEAGE_BRANCH" \
-        --git-lfs >> "$LOGFILE" 2>&1; then
-        die "repo init failed - check log: ${LOGFILE}"
+    if [ $already_init -eq 1 ]; then
+        ok "Already initialized with ${LINEAGE_BRANCH}"
+    else
+        echo -e "  ${DIM}Cloning LineageOS manifest...${RESET}"
+        if ! repo init -u https://github.com/LineageOS/android.git \
+            -b "$LINEAGE_BRANCH" \
+            --git-lfs >> "$LOGFILE" 2>&1; then
+            die "repo init failed — check log: ${LOGFILE}"
+        fi
+        ok "Repo initialized"
     fi
-
-    ok "Repo initialized"
     echo ""
 }
 
@@ -201,7 +229,7 @@ init_repo() {
 # Step 3: Local manifests
 # ============================================
 create_manifests() {
-    step 3 $TOTAL_STEPS "Adding Device Repos"
+    step 3 "Adding Device Repos"
 
     mkdir -p .repo/local_manifests
 
@@ -213,6 +241,7 @@ create_manifests() {
         local name="${REPO_NAMES[$i]}"
         local path="${REPO_PATHS[$i]}"
         local branch="${REPO_BRANCHES[$i]}"
+        local remote="${REPO_REMOTES[$i]}"
 
         echo -e "  ${DIM}[$count/$total]${RESET} Checking ${name} @ ${branch}..."
 
@@ -227,7 +256,7 @@ create_manifests() {
     {
         echo "<manifest>"
         for i in $(seq 0 $((${#REPO_NAMES[@]} - 1))); do
-            echo "    <project name=\"${REPO_NAMES[$i]}\" path=\"${REPO_PATHS[$i]}\" remote=\"github\" revision=\"${REPO_BRANCHES[$i]}\" />"
+            echo "    <project name=\"${REPO_NAMES[$i]}\" path=\"${REPO_PATHS[$i]}\" remote=\"${REPO_REMOTES[$i]}\" revision=\"${REPO_BRANCHES[$i]}\" />"
         done
         echo "</manifest>"
     } > .repo/local_manifests/a12s.xml
@@ -241,7 +270,7 @@ create_manifests() {
 # Step 4: Sync
 # ============================================
 sync_sources() {
-    step 4 $TOTAL_STEPS "Syncing Sources"
+    step 4 "Syncing Sources"
 
     echo -e "  ${DIM}Using /opt/crave/resync.sh ...${RESET}"
     echo -e "  ${DIM}This may take 30-60 minutes...${RESET}"
@@ -252,17 +281,19 @@ sync_sources() {
         die "Source sync failed"
     fi
 
-    # Verify critical files
+    # Verify critical files post-sync
     echo -e "  ${DIM}Verifying sync...${RESET}"
     local missing=0
-    for f in \
-        build/envsetup.sh \
-        device/samsung/a12s/device.mk \
-        vendor/samsung/a12s/a12s-vendor.mk \
-        device/samsung/exynos850-common/BoardConfigCommon.mk \
-        vendor/samsung/exynos850-common/exynos850-common-vendor.mk \
-        kernel/samsung/a12s/arch/arm64/configs/exynos850-a12snsxx_defconfig \
-        hardware/samsung/Android.bp; do
+    local critical_files=(
+        "build/envsetup.sh"
+        "device/samsung/a12s/device.mk"
+        "device/samsung/exynos850-common/BoardConfigCommon.mk"
+        "vendor/samsung/a12s/a12s-vendor.mk"
+        "vendor/samsung/exynos850-common/exynos850-common-vendor.mk"
+        "kernel/samsung/a12s/arch/arm64/configs/exynos850-a12snsxx_defconfig"
+        "hardware/samsung/Android.bp"
+    )
+    for f in "${critical_files[@]}"; do
         if [ -f "$f" ]; then
             ok "$f"
         else
@@ -274,62 +305,98 @@ sync_sources() {
     if [ $missing -gt 0 ]; then
         die "$missing critical file(s) missing after sync"
     fi
+
+    # Create kernel userdebug cfg if it doesn't exist — prevents merge_config
+    # from failing when TARGET_BUILD_VARIANT=userdebug (AndroidKernel.mk line 60)
+    local user_cfg="kernel/samsung/a12s/arch/arm64/configs/exynos850_userdebug.cfg"
+    if [ ! -f "$user_cfg" ]; then
+        warn "Creating empty exynos850_userdebug.cfg (required by AndroidKernel.mk)"
+        touch "$user_cfg"
+        ok "Created ${user_cfg}"
+    fi
+
     echo ""
 }
 
 # ============================================
-# Step 5: Build env + lunch
+# Step 5: ccache
+# ============================================
+setup_ccache() {
+    step 5 "ccache Setup"
+
+    if command -v ccache >/dev/null 2>&1; then
+        export USE_CCACHE=1
+        export CCACHE_EXEC
+        CCACHE_EXEC=$(command -v ccache)
+
+        # Only set size if the cache is fresh — respect existing config
+        if ! ccache -s 2>/dev/null | grep -q "max cache size"; then
+            ccache -M 50G >> "$LOGFILE" 2>&1
+            ok "ccache: 50GB max size set"
+        else
+            ok "ccache: using existing config"
+        fi
+
+        local cache_dir
+        cache_dir=$(ccache -p 2>/dev/null | grep "cache_dir" | awk '{print $4}' || echo "~/.ccache")
+        ok "ccache: cache dir = ${cache_dir}"
+    else
+        warn "ccache not available — skipping (expect slower rebuilds)"
+        export USE_CCACHE=0
+    fi
+    echo ""
+}
+
+# ============================================
+# Step 6: Build env + lunch
 # ============================================
 setup_and_lunch() {
-    step 5 $TOTAL_STEPS "Build Environment & Lunch"
-
-    # ccache setup
-    export USE_CCACHE=1
-    export CCACHE_EXEC=$(command -v ccache)
-    if [ -n "$CCACHE_EXEC" ]; then
-        ccache -M 50G 2>/dev/null || true
-        ok "ccache configured (50GB limit)"
-    else
-        warn "ccache not found, skipping"
-    fi
-
-    # Kernel build env
-    export KERNEL_DEFCONFIG="exynos850-a12snsxx_defconfig"
-    export TARGET_SOC="exynos850"
+    step 6 "Build Environment & Lunch"
 
     echo -e "  ${DIM}Sourcing build/envsetup.sh...${RESET}"
+    # envsetup.sh sets up functions but doesn't return useful exit codes reliably
+    # shellcheck source=/dev/null
     if ! source build/envsetup.sh >> "$LOGFILE" 2>&1; then
         die "Failed to source envsetup.sh"
     fi
     ok "envsetup.sh loaded"
 
+    # Re-export kernel vars after envsetup in case it clobbered them
+    export KERNEL_DEFCONFIG="exynos850-a12snsxx_defconfig"
+    export TARGET_SOC="exynos850"
+
     echo -e "  ${DIM}Running lunch ${LUNCH_TARGET}...${RESET}"
     if ! lunch "$LUNCH_TARGET" >> "$LOGFILE" 2>&1; then
         err "lunch ${LUNCH_TARGET} failed"
-        die "lunch failed - check log: ${LOGFILE}"
+        die "lunch failed — check log: ${LOGFILE}"
     fi
-    ok "Target: ${TARGET_PRODUCT:-unknown}"
+    ok "Target: ${TARGET_PRODUCT:-unknown} (${TARGET_BUILD_VARIANT:-unknown})"
     echo ""
 }
 
 # ============================================
-# Step 6: Build
+# Step 7: Build
 # ============================================
 build_rom() {
-    step 6 $TOTAL_STEPS "Building ROM"
+    step 7 "Building ROM"
 
     echo -e "  ${MAGENTA}This will take 1-3 hours...${RESET}"
     echo -e "  ${DIM}Output: out/target/product/${DEVICE}/lineage-*.zip${RESET}"
+    echo -e "  ${DIM}Progress filtered — full output in: ${LOGFILE}${RESET}"
     echo ""
 
     local start_time=$SECONDS
 
-    # Stream build output — show progress lines + errors, log everything
-    mka bacon 2>&1 | tee -a "$LOGFILE" | grep -E "^\[|error:|warning:|FAILED|Build completed" || true
-    local build_exit=${PIPESTATUS[0]}
-
-    if [ $build_exit -ne 0 ]; then
-        err "Build failed (exit code: $build_exit) - check log: ${LOGFILE}"
+    # Stream live progress while capturing full log.
+    # Filter to show only important lines so crave output stays readable.
+    if ! mka bacon 2>&1 | tee -a "$LOGFILE" \
+        | grep --line-buffered -E "^\[|FAILED|error:|make:|Building|Compiling|Linking|Package" \
+        | grep --line-buffered -v "^$"; then
+        err "Build failed — check log: ${LOGFILE}"
+        # Print last 40 lines of log to help diagnose
+        echo ""
+        echo -e "  ${YELLOW}Last 40 lines of build log:${RESET}"
+        tail -40 "$LOGFILE" | sed 's/^/    /'
         die "mka bacon failed"
     fi
 
@@ -359,7 +426,7 @@ build_rom() {
     fi
 
     echo ""
-    echo -e "  ${DIM}Log: ${LOGFILE}${RESET}"
+    echo -e "  ${DIM}Full log: ${LOGFILE}${RESET}"
     echo ""
 }
 
@@ -375,6 +442,7 @@ main() {
     init_repo
     create_manifests
     sync_sources
+    setup_ccache
     setup_and_lunch
     build_rom
 
