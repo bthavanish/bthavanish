@@ -82,6 +82,9 @@ REPO_NAMES=(
     "bthavanish/android_device_samsung_a12s"
     "bthavanish/android_vendor_samsung_exynos850-common"
     "bthavanish/android_vendor_samsung_a12s"
+    "LineageOS/android_hardware_samsung"
+    "LineageOS/android_hardware_samsung_slsi-linaro_libbt"
+    "LineageOS/android_hardware_samsung_slsi_linaro_libhwjpeg"
 )
 REPO_PATHS=(
     "kernel/samsung/a12s"
@@ -89,8 +92,14 @@ REPO_PATHS=(
     "device/samsung/a12s"
     "vendor/samsung/exynos850-common"
     "vendor/samsung/a12s"
+    "hardware/samsung"
+    "hardware/samsung/slsi/libbt"
+    "hardware/samsung/slsi/libhwjpeg"
 )
 REPO_BRANCHES=(
+    "${LINEAGE_BRANCH}"
+    "${LINEAGE_BRANCH}"
+    "${LINEAGE_BRANCH}"
     "${LINEAGE_BRANCH}"
     "${LINEAGE_BRANCH}"
     "${LINEAGE_BRANCH}"
@@ -165,9 +174,10 @@ init_repo() {
 
     rm -rf .repo/local_manifests
 
-    # Check if already correct
+    # Check if already correct — guard grep from set -e
     if [ -f ".repo/manifest.xml" ]; then
-        if grep -q "$LINEAGE_BRANCH" .repo/manifest.xml 2>/dev/null; then
+        (set +e; grep -q "$LINEAGE_BRANCH" .repo/manifest.xml 2>/dev/null)
+        if [ $? -eq 0 ]; then
             ok "Already initialized with ${LINEAGE_BRANCH}"
             return 0
         else
@@ -245,7 +255,14 @@ sync_sources() {
     # Verify critical files
     echo -e "  ${DIM}Verifying sync...${RESET}"
     local missing=0
-    for f in build/envsetup.sh device/samsung/a12s/device.mk vendor/samsung/a12s/a12s-vendor.mk; do
+    for f in \
+        build/envsetup.sh \
+        device/samsung/a12s/device.mk \
+        vendor/samsung/a12s/a12s-vendor.mk \
+        device/samsung/exynos850-common/BoardConfigCommon.mk \
+        vendor/samsung/exynos850-common/exynos850-common-vendor.mk \
+        kernel/samsung/a12s/arch/arm64/configs/exynos850-a12snsxx_defconfig \
+        hardware/samsung/Android.bp; do
         if [ -f "$f" ]; then
             ok "$f"
         else
@@ -265,6 +282,20 @@ sync_sources() {
 # ============================================
 setup_and_lunch() {
     step 5 $TOTAL_STEPS "Build Environment & Lunch"
+
+    # ccache setup
+    export USE_CCACHE=1
+    export CCACHE_EXEC=$(command -v ccache)
+    if [ -n "$CCACHE_EXEC" ]; then
+        ccache -M 50G 2>/dev/null || true
+        ok "ccache configured (50GB limit)"
+    else
+        warn "ccache not found, skipping"
+    fi
+
+    # Kernel build env
+    export KERNEL_DEFCONFIG="exynos850-a12snsxx_defconfig"
+    export TARGET_SOC="exynos850"
 
     echo -e "  ${DIM}Sourcing build/envsetup.sh...${RESET}"
     if ! source build/envsetup.sh >> "$LOGFILE" 2>&1; then
@@ -293,8 +324,12 @@ build_rom() {
 
     local start_time=$SECONDS
 
-    if ! mka bacon >> "$LOGFILE" 2>&1; then
-        err "Build failed - check log: ${LOGFILE}"
+    # Stream build output — show progress lines + errors, log everything
+    mka bacon 2>&1 | tee -a "$LOGFILE" | grep -E "^\[|error:|warning:|FAILED|Build completed" || true
+    local build_exit=${PIPESTATUS[0]}
+
+    if [ $build_exit -ne 0 ]; then
+        err "Build failed (exit code: $build_exit) - check log: ${LOGFILE}"
         die "mka bacon failed"
     fi
 
