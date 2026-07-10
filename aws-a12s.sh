@@ -2,7 +2,7 @@
 set -e
 
 DEVICE="a12s"
-LINEAGE_BRANCH="lineage-21"
+LINEAGE_BRANCH="lineage-21.0"
 BUILD_DIR="$HOME/lineage-a12s"
 LUNCH_TARGET="lineage_${DEVICE}-userdebug"
 
@@ -11,9 +11,9 @@ export TARGET_SOC="exynos850"
 
 step() {
     echo
-    echo "┌──────────────────────────────────────────┐"
-    echo "│ $1"
-    echo "└──────────────────────────────────────────┘"
+    echo "╔════════════════════════════════════════╗"
+    echo "║ $1"
+    echo "╚════════════════════════════════════════╝"
     echo
 }
 
@@ -22,11 +22,11 @@ step "1/7  Installing build packages"
 sudo apt update
 sudo apt install -y \
     bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
-    git git-lfs gnupg gperf imagemagick lib32readline-dev lib32z1-dev \
-    lib32ncurses-dev libdw-dev libelf-dev liblz4-tool libncurses-dev \
-    liblz4-tool libsdl1.2-dev libssl-dev libxml2 libxml2-utils lz4 lzop \
-    openjdk-17-jdk pngcrush protobuf-compiler python3 python3-protobuf \
-    rsync schedtool squashfs-tools xsltproc zip zlib1g-dev
+    git git-lfs gnupg gperf lib32readline-dev lib32z1-dev libdw-dev \
+    libelf-dev liblz4-tool libncurses-dev lib32ncurses-dev libssl-dev \
+    libxml2-utils lz4 lzop openjdk-17-jdk pngcrush protobuf-compiler \
+    python3 python3-protobuf rsync schedtool squashfs-tools xsltproc zip \
+    zlib1g-dev
 
 step "2/7  Installing repo"
 
