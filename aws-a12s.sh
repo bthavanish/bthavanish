@@ -3,6 +3,7 @@ set -e
 
 DEVICE="a12s"
 LINEAGE_BRANCH="lineage-21.0"
+LINEAGE_BRANCH_2="lineage-21"
 BUILD_DIR="$HOME/lineage-a12s"
 LUNCH_TARGET="lineage_${DEVICE}-userdebug"
 
@@ -61,9 +62,9 @@ cat > .repo/local_manifests/a12s.xml <<EOF
     <project name="bthavanish/android_device_samsung_a12s" path="device/samsung/a12s" remote="github" revision="$LINEAGE_BRANCH" />
     <project name="bthavanish/android_vendor_samsung_exynos850-common" path="vendor/samsung/exynos850-common" remote="github" revision="$LINEAGE_BRANCH" />
     <project name="bthavanish/android_vendor_samsung_a12s" path="vendor/samsung/a12s" remote="github" revision="$LINEAGE_BRANCH" />
-    <project name="LineageOS/android_hardware_samsung" path="hardware/samsung" remote="github" revision="$LINEAGE_BRANCH" />
-    <project name="LineageOS/android_hardware_samsung_slsi-linaro_libbt" path="hardware/samsung/slsi/libbt" remote="github" revision="$LINEAGE_BRANCH" />
-    <project name="LineageOS/android_hardware_samsung_slsi_linaro_libhwjpeg" path="hardware/samsung/slsi/libhwjpeg" remote="github" revision="$LINEAGE_BRANCH" />
+    <project name="LineageOS/android_hardware_samsung" path="hardware/samsung" remote="github" revision="$LINEAGE_BRANCH_2" />
+    <project name="LineageOS/android_hardware_samsung_slsi-linaro_libbt" path="hardware/samsung/slsi/libbt" remote="github" revision="$LINEAGE_BRANCH_2" />
+    <project name="LineageOS/android_hardware_samsung_slsi_linaro_libhwjpeg" path="hardware/samsung/slsi/libhwjpeg" remote="github" revision="$LINEAGE_BRANCH_2" />
 </manifest>
 EOF
 
