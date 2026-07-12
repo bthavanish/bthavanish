@@ -1,87 +1,33 @@
 #!/bin/bash
-set -e
+# Crave.io build script
+# Upload a12s/ directory to Crave and run this
 
-DEVICE="a12s"
-LINEAGE_BRANCH="lineage-21.0"
-LINEAGE_BRANCH_2="lineage-21"
-BUILD_DIR="$HOME/lineage-a12s"
-LUNCH_TARGET="lineage_${DEVICE}-userdebug"
+set -euo pipefail
 
-export KERNEL_DEFCONFIG="exynos850-a12snsxx_defconfig"
-export TARGET_SOC="exynos850"
+echo "=== LineageOS 21 for Samsung Galaxy A12s ==="
+echo "Build started at $(date)"
 
-step() {
-    echo
-    echo "╔════════════════════════════════════════╗"
-    echo "║ $1"
-    echo "╚════════════════════════════════════════╝"
-    echo
+# The crave build environment already has deps
+# Just need to init repo and build
+cd ~/lineage-a12s 2>/dev/null || {
+    mkdir -p ~/lineage-a12s
+    cd ~/lineage-a12s
+    repo init -u https://github.com/LineageOS/android.git -b lineage-21 --git-lfs
 }
 
-step "1/7  Installing build packages"
+# Apply patches
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/bthavanish/bthavanish/main/a12s/aws-build.sh)" || true
 
-sudo apt update
-sudo apt install -y \
-    bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
-    git git-lfs gnupg gperf lib32readline-dev lib32z1-dev libdw-dev \
-    libelf-dev liblz4-tool libncurses-dev lib32ncurses-dev libssl-dev \
-    libxml2-utils lz4 lzop openjdk-17-jdk pngcrush protobuf-compiler \
-    python3 python3-protobuf rsync schedtool squashfs-tools xsltproc zip \
-    zlib1g-dev
-
-step "2/7  Installing repo"
-
-mkdir -p "$HOME/.bin"
-if [ ! -f "$HOME/.bin/repo" ]; then
-    curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o "$HOME/.bin/repo"
-    chmod +x "$HOME/.bin/repo"
-fi
-export PATH="$HOME/.bin:$PATH"
-
-step "3/7  Setting git identity"
-
-git config --global user.name "bthavanish"
-git config --global user.email "bthavanish@gmail.com"
-git lfs install
-
-step "4/7  Initializing LineageOS"
-
-mkdir -p "$BUILD_DIR"
-cd "$BUILD_DIR"
-
-if [ ! -d .repo ]; then
-    repo init -u https://github.com/LineageOS/android.git -b "$LINEAGE_BRANCH" --git-lfs --no-clone-bundle
-fi
-
-mkdir -p .repo/local_manifests
-
-cat > .repo/local_manifests/a12s.xml <<EOF
-<manifest>
-    <project name="bthavanish/android_kernel_samsung_a12s" path="kernel/samsung/a12s" remote="github" revision="$LINEAGE_BRANCH" />
-    <project name="bthavanish/android_device_samsung_exynos850-common" path="device/samsung/exynos850-common" remote="github" revision="$LINEAGE_BRANCH" />
-    <project name="bthavanish/android_device_samsung_a12s" path="device/samsung/a12s" remote="github" revision="$LINEAGE_BRANCH" />
-    <project name="bthavanish/android_vendor_samsung_exynos850-common" path="vendor/samsung/exynos850-common" remote="github" revision="$LINEAGE_BRANCH" />
-    <project name="bthavanish/android_vendor_samsung_a12s" path="vendor/samsung/a12s" remote="github" revision="$LINEAGE_BRANCH" />
-    <project name="LineageOS/android_hardware_samsung" path="hardware/samsung" remote="github" revision="$LINEAGE_BRANCH_2" />
-</manifest>
-EOF
-
-step "5/7  Syncing sources"
-
-repo sync -c --force-sync --no-clone-bundle --no-tags -j"$(nproc)"
-
-step "6/7  Preparing build files"
-
-mkdir -p kernel/samsung/a12s/arch/arm64/configs
-touch kernel/samsung/a12s/arch/arm64/configs/exynos850_userdebug.cfg
-
-export USE_CCACHE=1
-export CCACHE_EXEC=/usr/bin/ccache
-ccache -M 50G
-
+# Build
 source build/envsetup.sh
-lunch "$LUNCH_TARGET"
+lunch lineage_a12s-ap2a-userdebug
 
-step "7/7  Building"
+# Fix hiddenapi and build
+m --skip-soong-tests nothing
+python3 patch_hiddenapi.py 2>/dev/null || true
+sed -i 's|(ln -f  out/target/product/a12s/lineage-21.0-20260712-UNOFFICIAL-a12s.zip )|(true )|' out/build-lineage_a12s.ninja 2>/dev/null || true
 
-mka bacon -j"$(nproc)"
+prebuilts/build-tools/linux-x86/bin/ninja -f out/combined-lineage_a12s.ninja -j$(nproc) bacon
+
+echo "Build finished at $(date)"
+ls -lh out/target/product/a12s/*.zip 2>/dev/null

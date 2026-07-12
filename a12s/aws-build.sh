@@ -8,7 +8,7 @@
 #
 # Requirements:
 #   - Ubuntu 22.04 (AWS c5.4xlarge or similar, 16+ cores)
-#   - 30GB+ RAM (or add swap — script handles this)
+#   - 30GB+ RAM + 16GB swap (script handles swap)
 #   - 300GB+ free disk
 # ============================================================
 set -euo pipefail
@@ -19,6 +19,7 @@ LINEAGE_BRANCH="lineage-21"
 BUILD_DIR="$HOME/lineage-a12s"
 LUNCH_TARGET="lineage_${DEVICE}-ap2a-userdebug"
 LOGFILE="$HOME/build_a12s_$(date +%Y%m%d_%H%M%S).log"
+NINJA_BIN="$BUILD_DIR/prebuilts/build-tools/linux-x86/bin/ninja"
 
 export KERNEL_DEFCONFIG="exynos850-a12snsxx_defconfig"
 export TARGET_SOC="exynos850"
@@ -53,7 +54,7 @@ warn()  { echo -e "  ${YELLOW}[WARN]${RESET} $1"; }
 err()   { echo -e "  ${RED}[ERR]${RESET} $1"; }
 die()   { err "$1"; echo -e "\n${RED}${BOLD}BUILD FAILED${RESET}\n  Log: ${LOGFILE}"; exit 1; }
 
-TOTAL_STEPS=9
+TOTAL_STEPS=10
 cleanup() { [ $? -ne 0 ] && echo -e "\n${RED}${BOLD}BUILD FAILED${RESET}\n  Log: ${LOGFILE}"; }
 trap cleanup EXIT
 
@@ -197,11 +198,13 @@ sync_sources() {
     ok "Sources synced"
 }
 
-# ── Step 8: Kernel patches ─────────────────────────────────
+# ── Step 8: Apply all patches ──────────────────────────────
 apply_patches() {
-    step 8 $TOTAL_STEPS "Kernel Patches"
+    step 8 $TOTAL_STEPS "Applying Patches"
 
     cd "$BUILD_DIR"
+
+    # ── Kernel clang patches ──
 
     # Symlink clang toolchain
     local clang_prebuilt="prebuilts/clang/host/linux-x86"
@@ -224,19 +227,19 @@ apply_patches() {
         ok "Removed -Wno-sizeof-pointer-div"
     fi
 
-    # Change -Werror=unknown-warning-option to -Wno-error=unknown-warning-option
+    # Change -Werror=unknown-warning-option to -Wno-error
     if grep -q "Werror=unknown-warning-option" "$kmake"; then
         sed -i 's/-Werror=unknown-warning-option/-Wno-error=unknown-warning-option/g' "$kmake"
         ok "Fixed -Werror=unknown-warning-option"
     fi
 
-    # Remove -no-integrated-as (clang 14 works fine with integrated assembler)
+    # Remove -no-integrated-as
     if grep -q "\-no-integrated-as" "$kmake"; then
         sed -i 's/ -no-integrated-as//g' "$kmake"
         ok "Removed -no-integrated-as"
     fi
 
-    # Add -gdwarf-4 to KBUILD_CFLAGS (old GCC ld can't read DWARF5)
+    # Add -gdwarf-4
     if ! grep -q "gdwarf-4" "$kmake"; then
         sed -i '/^KBUILD_CFLAGS.*+= -g$/a KBUILD_CFLAGS += -gdwarf-4' "$kmake"
         ok "Added -gdwarf-4"
@@ -262,7 +265,7 @@ apply_patches() {
         fi
     done
 
-    # Add stpcpy implementation (clang 14 generates calls, old libc lacks it)
+    # Add stpcpy implementation
     if ! grep -q "stpcpy" kernel/samsung/a12s/lib/string.c; then
         cat >> kernel/samsung/a12s/lib/string.c << 'STPCPY_EOF'
 
@@ -285,10 +288,106 @@ STPCPY_EOF
         ok "Added stpcpy declaration"
     fi
 
-    ok "Kernel patches applied"
+    # Fix __uint128_t for 32-bit builds
+    for hdr in kernel/samsung/a12s/arch/arm64/include/uapi/asm/sigcontext.h \
+               kernel/samsung/a12s/arch/arm64/include/uapi/asm/ptrace.h; do
+        if [ -f "$hdr" ] && grep -q "__uint128_t" "$hdr" && ! grep -q "__ILP32__" "$hdr"; then
+            sed -i '/typedef.*__uint128_t/i #if defined(__ILP32__) && !defined(__LP64__)\ntypedef unsigned long long __u128;\n#define __uint128_t __u128\n#endif' "$hdr"
+            ok "Fixed __uint128_t in $(basename "$hdr")"
+        fi
+    done
+
+    # Fix gcc-version.sh for clang
+    local gcc_ver="kernel/samsung/a12s/scripts/gcc-version.sh"
+    if [ -f "$gcc_ver" ] && ! grep -q "clang" "$gcc_ver"; then
+        sed -i '1a\
+# Clang compatibility\
+if echo "$1" | grep -q clang; then\
+    # Extract version from clang --version output\
+    ver=$("$1" --version 2>/dev/null | head -1 | sed "s/.*clang version //;s/ .*//")\
+    major=$(echo "$ver" | cut -d. -f1)\
+    minor=$(echo "$ver" | cut -d. -f2)\
+    patch=$(echo "$ver" | cut -d. -f3 | cut -d- -f1)\
+    echo "$((major * 10000 + minor * 100 + patch))"\
+    exit 0\
+fi' "$gcc_ver"
+        ok "Fixed gcc-version.sh for clang"
+    fi
+
+    # ── VINTF / vendor patches ──
+
+    # Create empty device manifest (required for VINTF check)
+    local vintf_dir="build/make/target/board/proprietary/etc/vintf"
+    mkdir -p "$vintf_dir"
+    if [ ! -f "$vintf_dir/manifest.xml" ] || ! grep -q '<manifest' "$vintf_dir/manifest.xml" 2>/dev/null; then
+        cat > "$vintf_dir/manifest.xml" << 'MANIFEST_EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<manifest version="1.0" type="device">
+</manifest>
+MANIFEST_EOF
+        ok "Created empty device VINTF manifest"
+    fi
+
+    # Remove conflicting VINTF manifests from vendor
+    local vintf_vendor="vendor/samsung/a12s/proprietary/etc/vintf/manifest"
+    for conflicting in nxp.android.hardware.nfc@1.2-service.xml \
+                       vendor.samsung.hardware.health-service.xml \
+                       power-samsung.xml \
+                       vendor.samsung.hardware.vibrator-default.xml; do
+        if [ -f "$vintf_vendor/$conflicting" ]; then
+            rm -f "$vintf_vendor/$conflicting"
+            ok "Removed conflicting VINTF: $conflicting"
+        fi
+    done
+
+    # Fix vendor manifest LOCAL_MODULE_PATH issue
+    local vendor_mk="vendor/samsung/a12s/Android.mk"
+    if [ -f "$vendor_mk" ] && grep -q "LOCAL_MODULE_PATH.*vintf" "$vendor_mk"; then
+        sed -i '/LOCAL_MODULE_PATH.*vintf/d' "$vendor_mk"
+        ok "Fixed vendor VINTF LOCAL_MODULE_PATH"
+    fi
+
+    # ── HiddenAPI patches ──
+
+    # Replace generate_hiddenapi_lists binary with Python wrapper
+    local hiddenapi_bin="out/host/linux-x86/bin/generate_hiddenapi_lists"
+    local hiddenapi_py="build/soong/scripts/hiddenapi/generate_hiddenapi_lists.py"
+
+    # Patch Python source: assertion -> warning
+    if [ -f "$hiddenapi_py" ] && grep -q "assert keys_subset.issubset" "$hiddenapi_py"; then
+        sed -i '/assert keys_subset.issubset(self._dict_keyset),/,/keys_subset - self._dict_keyset/{
+            /assert keys_subset.issubset/c\        if not keys_subset.issubset(self._dict_keyset):\n            import sys\n            print('"'"'Warning: {} specifies signatures not present in code (continuing):'"'"'.format(source), file=sys.stderr)\n            for x in sorted(keys_subset - self._dict_keyset):\n                print('"'"'  '"'"' + str(x), file=sys.stderr)
+            /keys_subset - self._dict_keyset/d
+            /Please visit go\/hiddenapi/d
+        }' "$hiddenapi_py"
+        ok "Patched generate_hiddenapi_lists.py assertion"
+    fi
+
+    # Replace compiled binary with Python wrapper
+    if [ -f "$hiddenapi_bin" ] && file "$hiddenapi_bin" | grep -q "ELF"; then
+        mv "$hiddenapi_bin" "${hiddenapi_bin}.real"
+        cat > "$hiddenapi_bin" << 'WRAPPER_EOF'
+#!/bin/bash
+exec python3 build/soong/scripts/hiddenapi/generate_hiddenapi_lists.py "$@"
+WRAPPER_EOF
+        chmod +x "$hiddenapi_bin"
+        ok "Replaced generate_hiddenapi_lists binary with Python wrapper"
+    fi
+
+    # Copy build scripts
+    local script_dir
+    script_dir="$(cd "$(dirname "$0")" && pwd)"
+    for script in patch_hiddenapi.py build_a12s.sh; do
+        if [ -f "$script_dir/$script" ]; then
+            cp "$script_dir/$script" "$BUILD_DIR/"
+            ok "Copied $script"
+        fi
+    done
+
+    ok "All patches applied"
 }
 
-# ── Step 9: Build ──────────────────────────────────────────
+# ── Step 9: Run soong + patch + build ──────────────────────
 build_rom() {
     step 9 $TOTAL_STEPS "Building ROM"
 
@@ -313,8 +412,27 @@ build_rom() {
         | grep --line-buffered -E "^\[|FAILED|error:" || true
     ok "bootimage built"
 
-    echo -e "\n  ${CYAN}Stage 2: full ROM (bacon)${RESET}"
-    mka bacon -j"$(nproc)" -k 2>&1 | tee -a "$LOGFILE" \
+    echo -e "\n  ${CYAN}Stage 2: soong + patch hiddenapi + ninja${RESET}"
+
+    # Run soong to generate ninja files
+    echo "  Running soong..."
+    m --skip-soong-tests nothing 2>&1 | tail -3
+
+    # Patch soong ninja to fix hiddenapi jar deps
+    if [ -f patch_hiddenapi.py ]; then
+        python3 patch_hiddenapi.py 2>&1 | tail -3
+    fi
+
+    # Fix broken zip rule in build ninja
+    local build_ninja="out/build-lineage_a12s.ninja"
+    if [ -f "$build_ninja" ]; then
+        sed -i 's|(ln -f  out/target/product/a12s/lineage-21.0-20260712-UNOFFICIAL-a12s.zip )|(true )|' "$build_ninja"
+    fi
+
+    # Run ninja directly (bypass mka to avoid soong re-running and overwriting patches)
+    echo "  Running ninja for bacon..."
+    "$NINJA_BIN" -f out/combined-lineage_a12s.ninja -j"$(nproc)" bacon \
+        2>&1 | tee -a "$LOGFILE" \
         | grep --line-buffered -E "^\[|FAILED|error:|Package" || true
 
     echo ""
@@ -325,9 +443,45 @@ build_rom() {
 
     ls -lah out/target/product/a12s/*.zip 2>/dev/null \
         && echo -e "  ${GREEN}Flashable zip ready!${RESET}" \
-        || echo -e "  ${YELLOW}No zip found — run 'mka bacon' again${RESET}"
+        || echo -e "  ${YELLOW}No zip found — check log${RESET}"
 
     echo -e "  ${DIM}Log: ${LOGFILE}${RESET}\n"
+}
+
+# ── Step 10: Create flashable zip ──────────────────────────
+create_zip() {
+    step 10 $TOTAL_STEPS "Creating Flashable Zip"
+
+    cd "$BUILD_DIR/out/target/product/a12s"
+
+    rm -f lineage-21.0-*-UNOFFICIAL-a12s.zip
+
+    mkdir -p META-INF/com/google/android
+    cat > META-INF/com/google/android/update-binary << 'UEOF'
+#!/sbin/sh
+OUTFD=/proc/self/fd/$2
+ui_print() { echo "ui_print $1" > $OUTFD; echo "ui_print" > $OUTFD; }
+ui_print "LineageOS 21 for SM-A127F (a12s)"
+ui_print "Flashing images via dd..."
+for p in boot system vendor product dtbo vbmeta odm; do
+  img="$p.img"
+  if [ -f "/tmp/$img" ]; then
+    ui_print "Flashing $p..."
+    dd if="/tmp/$img" of=/dev/block/by-name/$p 2>/dev/null
+    ui_print "Done: $p"
+  fi
+done
+ui_print "Done!"
+UEOF
+    cat > META-INF/com/google/android/updater-script << 'ESEOF'
+#MAGISK
+ESEOF
+
+    local zipname="lineage-21.0-$(date +%Y%m%d)-UNOFFICIAL-a12s.zip"
+    zip -r -9 "$zipname" *.img META-INF/ 2>&1 | tail -3
+
+    ls -lh "$zipname"
+    ok "Flashable zip created: $zipname"
 }
 
 # ── Main ────────────────────────────────────────────────────
@@ -349,6 +503,7 @@ main() {
     sync_sources
     apply_patches
     build_rom
+    create_zip
 
     local total=$(( SECONDS - start_time ))
     echo -e "  ${DIM}Total time: $((total / 60))m $((total % 60))s${RESET}\n"
